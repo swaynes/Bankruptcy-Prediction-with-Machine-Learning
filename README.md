@@ -3,6 +3,8 @@ Bankruptcy Prediction with Machine Learning
 
 This analysis was conducted using data from the Taiwan Economic Journal over a period of 20 years. (1999-2019)
 
+MRP Project_v0.x_a.Rmd generates the means and standard deviations of the performances between each method.
+
 References:
 
 Liang D, Tsai CF (2020). Taiwanese Bankruptcy Prediction Data Set. UCI Repository of Machine Learning Databases. https://archive.ics.uci.edu/ml/datasets/Taiwanese+Bankruptcy+Prediction.
