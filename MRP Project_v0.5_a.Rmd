@@ -1,0 +1,502 @@
+---
+title: "R Notebook"
+output: pdf_document
+---
+
+```{r}
+library(caret)
+library(tidyverse)
+library(ISLR2)
+library(tidyverse)
+library(ISLR)
+library(e1071)
+library(dplyr)
+library(randomForest)
+library(ROSE)
+```
+
+```{r, warning = False}
+#Find Mean Performance
+simulate_data <- function(methods){
+data <- read.csv("data.csv")
+
+data$Bankrupt. <- ifelse(data$Bankrupt.==1, "Bankrupted", "Not Bankrupted")
+
+data$Bankrupt. <- as.factor(data$Bankrupt.)
+
+dim(data)
+
+data$Net.Income.Flag <- NULL
+
+data <- data[, !names(data) %in% c("ROA.B..before.interest.and.depreciation.after.tax", 
+           "ROA.C..before.interest.and.depreciation.before.interest",
+           "Persistent.EPS.in.the.Last.Four.Seasons",
+           "Operating.Profit.Per.Share..Yuan...",
+           "Current.Liabilities.Equity",
+           "Current.Liability.to.Equity",
+           "Operating.Gross.Margin",
+           "Pre.tax.net.Interest.Rate",
+           "Operating.Profit.Rate")]
+dim(data)
+
+#Stratified Split
+split.index <- createDataPartition(data$Bankrupt., p = .8, list = FALSE)
+train_set<- data[split.index,]
+valid_set<- data[-split.index,]
+
+length(data[which(data$Bankrupt.=="Bankrupted"),][,1])/length(data[,1])
+length(train_set[which(train_set$Bankrupt.=="Bankrupted"),][,1])/length(train_set[,1])
+length(valid_set[which(valid_set$Bankrupt.=="Bankrupted"),][,1])/length(valid_set[,1])
+
+train_set$Liability.Assets.Flag <- as.factor(train_set$Liability.Assets.Flag)
+valid_set$Liability.Assets.Flag <- as.factor(valid_set$Liability.Assets.Flag)
+
+#Undersampling
+data_bankrupted <- which(train_set$Bankrupt. == "Bankrupted") #Bankrupted observations
+data_not_bankrupted <- which(train_set$Bankrupt. == "Not Bankrupted") #Not-bankrupted observations
+
+bankrupted_number <- length(data_bankrupted) #How many bankrupted
+
+not_bankrupted_samples <- sample(data_not_bankrupted, bankrupted_number) #Sample Not-bankrupted with amount of Bankrupted
+
+train_undersampled <- train_set[c(data_bankrupted, not_bankrupted_samples),] #Combine
+
+#Oversampling - Random Oversampling Examples (ROSE)
+train_oversampled_rose <- RSBID::ROS(data = train_set, 'Bankrupt.')
+
+#Oversampling - Synthetic Minority Oversampling Technique (SMOTE)
+#library(smotefamily)
+library(RSBID)
+
+#train_oversampled_smote <- smotefamily::SMOTE(train_set[,2:length(train_set[1,])], train_set$Bankrupt., K = 5)$data
+
+train_oversampled_smote <- RSBID::SMOTE_NC(train_set, 'Bankrupt.', k = 5)
+
+valid_set_undersampled <- valid_set
+valid_set_rose <- valid_set
+valid_set_smote <- valid_set
+
+#Standardize data
+
+#Original
+count = 2
+check = 0
+while(count < length(data[3,]) && check == 0){
+  count = count + 1
+  if(colnames(data[1,])[count] == "Liability.Assets.Flag"){
+    check = 1
+  }
+}
+
+for (i in 2:length(data[3,])){
+  if(i != count){
+    means = mean(train_set[,i])
+    sds = sd(train_set[,i])
+    valid_set[,i] = (valid_set[,i]-means)/sds 
+  }
+}
+
+train_liability <- train_set[,count]
+
+total_col <- length(data[3,])-1
+
+train_set[,count] <- NULL
+
+train_set[,2:total_col] <- scale(train_set[,2:total_col])
+
+train_set[,total_col+1] <- train_liability
+
+valid_liability <- valid_set[,count]
+valid_set[,count] <- NULL
+valid_set[,total_col+1] <- valid_liability
+
+colnames(train_set)[total_col+1] <- "Liability.Assets.Flag"
+colnames(valid_set)[total_col+1] <- "Liability.Assets.Flag"
+
+#Undersampled data
+count = as.numeric(which(colnames(train_undersampled)=="Liability.Assets.Flag"))
+
+for (i in 2:length(train_undersampled[3,])){
+  if(i != count){
+    means = mean(train_undersampled[,i])
+    sds = sd(train_undersampled[,i])
+    valid_set_undersampled[,i] = (valid_set_undersampled[,i]-means)/sds
+  }
+}
+
+train_liability <- train_undersampled[,count]
+
+train_undersampled[,count] <- NULL
+
+train_undersampled[,2:total_col] <- scale(train_undersampled[,2:total_col])
+
+train_undersampled[,total_col+1] <- train_liability
+
+valid_liability <- valid_set_undersampled[,count]
+valid_set_undersampled[,count] <- NULL
+valid_set_undersampled[,total_col+1] <- valid_liability
+
+colnames(train_undersampled)[total_col+1] <- "Liability.Assets.Flag"
+colnames(valid_set_undersampled)[total_col+1] <- "Liability.Assets.Flag"
+
+#ROSE Data
+count = as.numeric(which(colnames(train_oversampled_rose)=="Liability.Assets.Flag"))
+
+for (i in 2:length(train_oversampled_rose[3,])){
+  if(i != count){
+    means = mean(train_oversampled_rose[,i])
+    sds = sd(train_oversampled_rose[,i])
+    valid_set_rose[,i] = (valid_set_rose[,i]-means)/sds
+  }
+}
+
+train_liability <- train_oversampled_rose[,count]
+
+train_oversampled_rose[,count] <- NULL
+
+train_oversampled_rose[,2:total_col] <- scale(train_oversampled_rose[,2:total_col])
+
+train_oversampled_rose[,total_col+1] <- train_liability
+
+valid_liability <- valid_set_rose[,count]
+valid_set_rose[,count] <- NULL
+valid_set_rose[,total_col+1] <- valid_liability
+
+colnames(train_oversampled_rose)[total_col+1] <- "Liability.Assets.Flag"
+colnames(valid_set_rose)[total_col+1] <- "Liability.Assets.Flag"
+
+#SMOTE Data
+count = as.numeric(which(colnames(train_oversampled_smote)=="Liability.Assets.Flag"))
+
+for (i in 2:length(train_oversampled_smote[3,])){
+  if(i != count){
+    means = mean(train_oversampled_smote[,i])
+    sds = sd(train_oversampled_smote[,i])
+    valid_set_smote[,i] = (valid_set_smote[,i]-means)/sds
+  }
+}
+
+train_liability <- train_oversampled_smote[,count]
+
+train_oversampled_smote[,count] <- NULL
+
+train_oversampled_smote[,2:total_col] <- scale(train_oversampled_smote[,2:total_col])
+
+train_oversampled_smote[,total_col+1] <- train_liability
+
+valid_liability <- valid_set_smote[,count]
+valid_set_smote[,count] <- NULL
+valid_set_smote[,total_col+1] <- valid_liability
+
+colnames(train_oversampled_smote)[total_col+1] <- "Liability.Assets.Flag"
+colnames(valid_set_smote)[total_col+1] <- "Liability.Assets.Flag"
+
+#Fitting to KNN
+control <- trainControl(method="cv", number=10)
+
+fit.knn_original <- caret::train(Bankrupt. ~., data=train_set, method=methods[1], trControl=control)
+predict.knn <- predict(fit.knn_original, valid_set)
+cm.knn <- confusionMatrix(predict.knn, valid_set$Bankrupt.)
+table(predicted = predict.knn, actual = valid_set$Bankrupt.)
+cm.knn$overall['Accuracy']
+cm.knn$byClass['Sensitivity'] #Bankrupted is True
+cm.knn$byClass['Specificity']
+
+fit.knn_undersampled <- caret::train(Bankrupt.~., data=train_undersampled, method=methods[1], trControl=control)
+predict.knn_undersampled <- predict(fit.knn_undersampled, valid_set_undersampled)
+cm.knn_undersampled <- confusionMatrix(predict.knn_undersampled, valid_set_undersampled$Bankrupt.)
+table(predicted = predict.knn_undersampled, actual = valid_set_undersampled$Bankrupt.)
+cm.knn_undersampled$overall['Accuracy']
+cm.knn_undersampled$byClass['Sensitivity']
+cm.knn_undersampled$byClass['Specificity']
+
+fit.knn_oversampled_smote <- caret::train(Bankrupt.~., data=train_oversampled_smote, method=methods[1], trControl=control)
+predict.knn_oversampled_smote <- predict(fit.knn_oversampled_smote, valid_set)
+cm.knn_smote <- confusionMatrix(predict.knn_oversampled_smote, valid_set_smote$Bankrupt.)
+table(predicted = predict.knn_oversampled_smote, actual = valid_set_smote$Bankrupt.)
+cm.knn_smote$overall['Accuracy']
+cm.knn_smote$byClass['Sensitivity']
+cm.knn_smote$byClass['Specificity']
+
+fit.knn_oversampled_rose <- caret::train(Bankrupt.~., data=train_oversampled_rose, method=methods[1], trControl=control)
+predict.knn_oversampled_rose <- predict(fit.knn_oversampled_rose, valid_set)
+cm.knn_rose <- confusionMatrix(predict.knn_oversampled_rose, valid_set_rose$Bankrupt.)
+table(predicted = predict.knn_oversampled_rose, actual = valid_set_rose$Bankrupt.)
+cm.knn_rose$overall['Accuracy']
+cm.knn_rose$byClass['Sensitivity']
+cm.knn_rose$byClass['Specificity']
+
+names <- c("Original", "Undersampling", "Oversampling: SMOTE", "Oversampling: ROSE")
+
+accu <- c(as.numeric(cm.knn$overall['Accuracy']), as.numeric(cm.knn_undersampled$overall['Accuracy']), as.numeric(cm.knn_smote$overall['Accuracy']), as.numeric(cm.knn_rose$overall['Accuracy']))
+
+sensitivities <- c(as.numeric(cm.knn$byClass['Sensitivity']), as.numeric(cm.knn_undersampled$byClass['Sensitivity']), as.numeric(cm.knn_smote$byClass['Sensitivity']), as.numeric(cm.knn_rose$byClass['Sensitivity']))
+
+specificities <- c(as.numeric(cm.knn$byClass['Specificity']), as.numeric(cm.knn_undersampled$byClass['Specificity']), as.numeric(cm.knn_smote$byClass['Specificity']), cm.knn_rose$byClass['Specificity'])
+
+precisions <- c(cm.knn$byClass['Precision'], cm.knn_undersampled$byClass['Precision'], cm.knn_smote$byClass['Precision'], cm.knn_rose$byClass['Precision'])
+
+recalls <- c(cm.knn$byClass['Recall'], cm.knn_undersampled$byClass['Recall'], cm.knn_smote$byClass['Recall'], cm.knn_rose$byClass['Recall'])
+
+f1s <- c(cm.knn$byClass['F1'], cm.knn_undersampled$byClass['F1'], cm.knn_smote$byClass['F1'], cm.knn_rose$byClass['F1'])
+
+knn_results <- data.frame(
+  Method_names = names,
+  Accuaries = accu,
+  Sensitivity = sensitivities,
+  Specificity = specificities,
+  Precision = precisions,
+  Recall = recalls,
+  F1_Score = f1s
+)
+
+#Fitting to GLM
+
+fit.glm <- caret::train(Bankrupt. ~ ., data = train_set,method = "glm",family = "binomial",trControl = control)
+predict.glm <- predict(fit.glm, valid_set)
+cm.glm <- confusionMatrix(predict.glm, valid_set$Bankrupt.)
+
+fit.glm_undersampled <- caret::train(Bankrupt. ~ ., data = train_undersampled,method = "glm",family = "binomial",trControl = control)
+predict.glm <- predict(fit.glm_undersampled, valid_set_undersampled)
+cm.glm_undersampled <- confusionMatrix(predict.glm, valid_set_undersampled$Bankrupt.)
+
+fit.glm_smote <- caret::train(Bankrupt. ~ ., data = train_oversampled_smote,method = "glm",family = "binomial",trControl = control)
+predict.glm <- predict(fit.glm_smote, valid_set_smote)
+cm.glm_smote <- confusionMatrix(predict.glm, valid_set_smote$Bankrupt.)
+
+fit.glm_rose <- caret::train(Bankrupt. ~ ., data = train_oversampled_rose,method = "glm",family = "binomial",trControl = control)
+predict.glm <- predict(fit.glm_rose, valid_set_rose)
+cm.glm_rose <- confusionMatrix(predict.glm, valid_set_rose$Bankrupt.)
+
+accu <- c(as.numeric(cm.glm$overall['Accuracy']), as.numeric(cm.glm_undersampled$overall['Accuracy']), as.numeric(cm.glm_smote$overall['Accuracy']), as.numeric(cm.glm_rose$overall['Accuracy']))
+
+sensitivities <- c(as.numeric(cm.glm$byClass['Sensitivity']), as.numeric(cm.glm_undersampled$byClass['Sensitivity']), as.numeric(cm.glm_smote$byClass['Sensitivity']), as.numeric(cm.glm_rose$byClass['Sensitivity']))
+
+specificities <- c(as.numeric(cm.glm$byClass['Specificity']), as.numeric(cm.glm_undersampled$byClass['Specificity']), as.numeric(cm.glm_smote$byClass['Specificity']), cm.glm_rose$byClass['Specificity'])
+
+precisions <- c(cm.glm$byClass['Precision'], cm.glm_undersampled$byClass['Precision'], cm.glm_smote$byClass['Precision'], cm.glm_rose$byClass['Precision'])
+
+recalls <- c(cm.glm$byClass['Recall'], cm.glm_undersampled$byClass['Recall'], cm.glm_smote$byClass['Recall'], cm.glm_rose$byClass['Recall'])
+
+f1s <- c(cm.glm$byClass['F1'], cm.glm_undersampled$byClass['F1'], cm.glm_smote$byClass['F1'], cm.glm_rose$byClass['F1'])
+
+glm_results <- data.frame(
+  Method_names = names,
+  Accuaries = accu,
+  Sensitivity = sensitivities,
+  Specificity = specificities,
+  Precision = precisions,
+  Recall = recalls,
+  F1_Score = f1s
+)
+
+#Fitting to RF
+
+#Original
+total_col <- length(train_set[1,])
+
+train_x <- train_set[,2:total_col]
+train_y <- train_set$Bankrupt.
+
+rf_tune <- tuneRF(train_x, train_y, ntreeTry = 500, plot=FALSE, trace = FALSE)
+mtry_best = rf_tune[as.numeric(which(rf_tune[,2] == min(rf_tune[,2]))),1]
+
+tunegrid <- expand.grid(.mtry=c(mtry_best))
+
+fit.rf_original <- caret::train(Bankrupt. ~., data=train_set, method="rf", metric = "Accuracy", tuneGrid = tunegrid, trControl=control)
+predict.rf <- predict(fit.rf_original, valid_set)
+cm.rf <- confusionMatrix(predict.rf, valid_set$Bankrupt.)
+
+#Undersampled
+train_x_under <- train_undersampled[,2:total_col]
+train_y_under <- train_undersampled$Bankrupt.
+
+rf_tune <- tuneRF(train_x_under, train_y_under, ntreeTry = 500, plot=FALSE, trace = FALSE)
+mtry_best = rf_tune[as.numeric(which(rf_tune[,2] == min(rf_tune[,2]))),1]
+
+tunegrid <- expand.grid(.mtry=c(mtry_best))
+
+fit.rf_under <- caret::train(Bankrupt. ~., data=train_undersampled, method="rf", metric = "Accuracy", tuneGrid = tunegrid, trControl=control)
+predict.rf <- predict(fit.rf_under, valid_set_undersampled)
+cm.rf_undersampled <- confusionMatrix(predict.rf, valid_set_undersampled$Bankrupt.)
+
+#SMOTE
+train_x_smote <- train_oversampled_smote[,2:total_col]
+train_y_smote <- train_oversampled_smote$Bankrupt.
+
+rf_tune <- tuneRF(train_x_under, train_y_under, ntreeTry = 500, plot=FALSE, trace = FALSE)
+mtry_best = rf_tune[as.numeric(which(rf_tune[,2] == min(rf_tune[,2]))),1]
+
+tunegrid <- expand.grid(.mtry=c(mtry_best))
+fit.rf_smote <- caret::train(Bankrupt. ~., data=train_oversampled_smote, method="rf", metric = "Accuracy", tuneGrid = tunegrid, trControl=control)
+predict.rf <- predict(fit.rf_smote, valid_set_smote)
+cm.rf_smote <- confusionMatrix(predict.rf, valid_set_smote$Bankrupt.)
+
+#ROSE
+train_x_rose <- train_oversampled_rose[,2:total_col]
+train_y_rose <- train_oversampled_rose$Bankrupt.
+rf_tune <- tuneRF(train_x_rose, train_y_rose, ntreeTry = 500, plot=FALSE, trace = FALSE)
+mtry_best = rf_tune[as.numeric(which(rf_tune[,2] == min(rf_tune[,2]))),1]
+
+tunegrid <- expand.grid(.mtry=c(mtry_best)) #Try different values
+
+fit.rf_rose <- caret::train(Bankrupt. ~., data=train_oversampled_rose, method="rf", metric = "Accuracy", tuneGrid = tunegrid, trControl=control)
+predict.rf <- predict(fit.rf_rose, valid_set_rose)
+cm.rf_rose <- confusionMatrix(predict.rf, valid_set_rose$Bankrupt.)
+
+accu <- c(as.numeric(cm.rf$overall['Accuracy']), as.numeric(cm.rf_undersampled$overall['Accuracy']), as.numeric(cm.rf_smote$overall['Accuracy']), as.numeric(cm.rf_rose$overall['Accuracy']))
+
+sensitivities <- c(as.numeric(cm.rf$byClass['Sensitivity']), as.numeric(cm.rf_undersampled$byClass['Sensitivity']), as.numeric(cm.rf_smote$byClass['Sensitivity']), as.numeric(cm.rf_rose$byClass['Sensitivity']))
+
+specificities <- c(as.numeric(cm.rf$byClass['Specificity']), as.numeric(cm.rf_undersampled$byClass['Specificity']), as.numeric(cm.rf_smote$byClass['Specificity']), cm.rf_rose$byClass['Specificity'])
+
+precisions <- c(cm.rf$byClass['Precision'], cm.rf_undersampled$byClass['Precision'], cm.rf_smote$byClass['Precision'], cm.rf_rose$byClass['Precision'])
+
+recalls <- c(cm.rf$byClass['Recall'], cm.rf_undersampled$byClass['Recall'], cm.rf_smote$byClass['Recall'], cm.rf_rose$byClass['Recall'])
+
+f1s <- c(cm.rf$byClass['F1'], cm.rf_undersampled$byClass['F1'], cm.rf_smote$byClass['F1'], cm.rf_rose$byClass['F1'])
+
+rf_results <- data.frame(
+  Method_names = names,
+  Accuaries = accu,
+  Sensitivity = sensitivities,
+  Specificity = specificities,
+  Precision = precisions,
+  Recall = recalls,
+  F1_Score = f1s
+)
+
+results = c(list(knn_results), list(glm_results), list(rf_results))
+
+return(results)
+}
+```
+
+```{r, warning=FALSE}
+results <- c()
+n_times = 10
+
+for(i in 1:n_times){
+  result = simulate_data(c("knn", "glm", "rf"))
+  results = c(results, list(result))
+}
+```
+
+
+
+```{r}
+performance_calc <- function(results, n_times){
+accu <- c()
+mean_accu <- c()
+sd_accu <- c()
+
+for(i in 1:length(results[[1]][,2])){
+  for(j in 1:n_times){
+    accu = c(accu, results[[j]][i,2])
+  }
+  mean_accu = c(mean_accu, mean(accu))
+  sd_accu = c(sd_accu, sd(accu))
+  accu <- c()
+}
+
+sens <- c()
+mean_sens <- c()
+sd_sens <- c()
+
+for(i in 1:length(results[[1]][,2])){
+  for(j in 1:n_times){
+    sens = c(sens, results[[j]][i,3])
+  }
+  mean_sens = c(mean_sens, mean(sens))
+  sd_sens = c(sd_sens, sd(sens))
+  sens <- c()
+}
+
+spec <- c()
+mean_spec <- c()
+sd_spec <- c()
+
+for(i in 1:length(results[[1]][,2])){
+  for(j in 1:n_times){
+    spec = c(spec, results[[j]][i,4])
+  }
+  mean_spec = c(mean_spec, mean(spec))
+  sd_spec = c(sd_spec, sd(spec))
+  spec <- c()
+}
+
+prec <- c()
+mean_prec <- c()
+sd_prec <- c()
+
+for(i in 1:length(results[[1]][,2])){
+  for(j in 1:n_times){
+    prec = c(prec, results[[j]][i,5])
+  }
+  mean_prec = c(mean_prec, mean(prec))
+  sd_prec = c(sd_prec, sd(prec))
+  prec <- c()
+}
+
+f1 <- c()
+mean_f1 <- c()
+sd_f1 <- c()
+
+for(i in 1:length(results[[1]][,2])){
+  for(j in 1:n_times){
+    f1 = c(f1, results[[j]][i,5])
+  }
+  mean_f1 = c(mean_f1, mean(f1))
+  sd_f1 = c(sd_f1, sd(f1))
+  f1 <- c()
+}
+
+names <- c("Original", "Undersampling", "Oversampling: SMOTE", "Oversampling: ROSE")
+
+mean_result_knn <- data.frame(
+  Method_names = names,
+  Accu_Mean = mean_accu,
+  Accu_Sd = sd_accu,
+  Sens_Mean = mean_sens,
+  Sens_Sd = sd_sens,
+  Spec_Mean = mean_spec,
+  Spec_Sd = sd_spec,
+  Prec_Mean = mean_prec,
+  Prec_Sd = sd_prec,
+  F1_Mean = mean_f1,
+  F1_Sd = sd_f1
+)
+return(mean_result_knn)
+}
+```
+
+```{r}
+knn_results <-c()
+glm_results <-c()
+rf_results <-c()
+
+for (i in 1:10){
+  knn_results = c(knn_results, results[[i]][1])
+  glm_results = c(glm_results, results[[i]][2])
+  rf_results = c(rf_results, results[[i]][3])
+}
+
+```
+
+
+```{r}
+knn_mean_sd = performance_calc(knn_results, n_times)
+glm_mean_sd = performance_calc(glm_results, n_times)
+rf_mean_sd = performance_calc(rf_results, n_times)
+```
+
+
+```{r}
+knn_mean_sd #KNN
+glm_mean_sd #Log Regression
+rf_mean_sd #Random Forest
+```
+```{r}
+
+```
+
