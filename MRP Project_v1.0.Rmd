@@ -785,19 +785,6 @@ for(i in 1:length(results[[1]][,2])){
   f1 <- c()
 }
 
-auc <- c()
-mean_auc <- c()
-sd_auc <- c()
-
-for(i in 1:length(results[[1]][,2])){
-  for(j in 1:n_times){
-    auc = c(auc, results[[j]][i,7])
-  }
-  mean_auc = c(mean_auc, mean(auc))
-  sd_auc = c(sd_auc, sd(auc))
-  auc <- c()
-}
-
 names <- c("Original", "RUS", "SMOTE", "ROS", "UMAP: Original", "UMAP: RUS", "UMAP: SMOTE", "UMAP: ROS", "PCA: Original",
            "PCA: RUS", "PCA: SMOTE", "PCA: ROS")
 
@@ -812,9 +799,7 @@ mean_result_knn <- data.frame(
   Prec_Mean = mean_prec,
   Prec_Sd = sd_prec,
   F1_Mean = mean_f1,
-  F1_Sd = sd_f1,
-  AUC_Mean = mean_auc,
-  AUC_Sd = sd_auc
+  F1_Sd = sd_f1
 )
 return(mean_result_knn)
 }
